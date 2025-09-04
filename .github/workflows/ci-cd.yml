@@ -52,11 +52,40 @@ jobs:
         docker build -t frontend ./todo-app
 
     - name: Test Docker containers
+      env:
+        MONGODB_URI: ${{ secrets.MONGODB_URI || 'mongodb://localhost:27017/test' }}
+        CORS_ORIGIN: '*'
+        NEXT_PUBLIC_API_URL: 'http://localhost:4000'
       run: |
-        docker-compose up -d
-        sleep 15
+        # Create a test docker-compose file with MongoDB
+        cat > docker-compose.test.yml << EOF
+        version: "3.9"
+        services:
+          
+          backend:
+            build: ./backend
+            environment:
+              - PORT=4000
+              - MONGODB_URI=\${MONGODB_URI}
+              - CORS_ORIGIN=\${CORS_ORIGIN}
+            ports:
+              - "4000:4000"
+
+          frontend:
+            build: ./todo-app
+            environment:
+              - NEXT_PUBLIC_API_URL=\${NEXT_PUBLIC_API_URL}
+            ports:
+              - "3000:3000"
+            depends_on:
+              - backend
+        EOF
+        
+        # Start containers with test configuration
+        MONGODB_URI="$MONGODB_URI" CORS_ORIGIN="$CORS_ORIGIN" NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL" docker-compose -f docker-compose.test.yml up -d
+        sleep 30
         # Test backend health endpoint
-        curl -f http://localhost:4000/health || (echo "Backend health check failed" && docker-compose logs backend && exit 1)
+        curl -f http://localhost:4000/health || (echo "Backend health check failed" && docker-compose -f docker-compose.test.yml logs backend && exit 1)
         # Test frontend
-        curl -f http://localhost:3000 || (echo "Frontend check failed" && docker-compose logs frontend && exit 1)
-        docker-compose down
+        curl -f http://localhost:3000 || (echo "Frontend check failed" && docker-compose -f docker-compose.test.yml logs frontend && exit 1)
+        docker-compose -f docker-compose.test.yml down
